@@ -1,8 +1,9 @@
 #include <cerrno>
 #include <chrono>
 #include <cstdlib>
+#include <future>
 #include <iostream>
-#include <limits>
+#include <vector>
 
 namespace mtt
 {
@@ -24,6 +25,19 @@ namespace mtt
   private:
     std::chrono::high_resolution_clock::time_point start_;
   };
+
+  using data_t = std::vector< unsigned long long >;
+  using value_t = data_t::value_type;
+
+  size_t sum(const data_t& values, size_t start, size_t finish)
+  {
+    size_t sum = 0;
+    for (size_t i = start; i < finish; ++i)
+    {
+      sum += values[i];
+    }
+    return sum;
+  }
 }
 
 int main(int argc, char* argv[])
@@ -36,14 +50,42 @@ int main(int argc, char* argv[])
 
   char* endptr = nullptr;
   errno = 0;
-  long val = std::strtol(argv[1], &endptr, 10);
 
-  using limit_t = std::numeric_limits< int >;
-  if (endptr == argv[1] || *endptr != '\0' || errno == ERANGE || val < limit_t::min() || val > limit_t::max())
+  size_t threads = std::strtoul(argv[1], &endptr, 10);
+  if (endptr == argv[1] || *endptr != '\0' || errno == ERANGE || !threads)
   {
     std::cerr << "Incorrect argument" << '\n';
     return 2;
   }
 
-  // int n = static_cast< int >(val);
+  constexpr size_t size{1'000'000'000};
+  mtt::data_t values(size, 1);
+  mtt::value_t sum{0};
+
+  double init{0}, total{0};
+  mtt::Clicker cl;
+
+  init = cl.millisec();
+
+  std::vector< std::future< size_t > > results;
+  results.reserve(threads);
+  size_t base = size / threads;
+  size_t remainder = size % threads;
+  for (size_t i = 0; i < threads; ++i)
+  {
+    size_t start = i * base + std::min(i, remainder);
+    size_t end = start + base + (i < remainder ? 1 : 0);
+
+    results.emplace_back(std::async(std::launch::async, mtt::sum, std::cref(values), start, end));
+  }
+
+  for (size_t i = 0; i < threads; ++i)
+  {
+    sum += results[i].get();
+  }
+
+  total = cl.millisec();
+
+  std::cout << "Result: " << sum << '\n';
+  std::cout << "Execution time: " << total - init << '\n';
 }
