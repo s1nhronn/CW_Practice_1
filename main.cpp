@@ -10,17 +10,8 @@ namespace mtt
   class Clicker
   {
   public:
-    Clicker():
-      start_(std::chrono::high_resolution_clock::now())
-    {}
-    double millisec() const
-    {
-      using std::chrono::duration_cast;
-      using std::chrono::high_resolution_clock;
-      using std::chrono::milliseconds;
-      auto t = high_resolution_clock::now();
-      return static_cast< double >(duration_cast< milliseconds >(t - start_).count());
-    }
+    Clicker();
+    double millisec() const;
 
   private:
     std::chrono::high_resolution_clock::time_point start_;
@@ -29,15 +20,7 @@ namespace mtt
   using data_t = std::vector< unsigned long long >;
   using value_t = data_t::value_type;
 
-  size_t sum(const data_t& values, size_t start, size_t finish)
-  {
-    size_t sum = 0;
-    for (size_t i = start; i < finish; ++i)
-    {
-      sum += values[i];
-    }
-    return sum;
-  }
+  value_t sum(data_t::const_iterator start, data_t::const_iterator end);
 }
 
 int main(int argc, char* argv[])
@@ -48,15 +31,17 @@ int main(int argc, char* argv[])
     return 1;
   }
 
-  char* endptr = nullptr;
+  char* endPtr = nullptr;
   errno = 0;
 
-  size_t threads = std::strtoul(argv[1], &endptr, 10);
-  if (endptr == argv[1] || *endptr != '\0' || errno == ERANGE || !threads)
+  long val = std::strtol(argv[1], &endPtr, 10);
+  if (endPtr == argv[1] || *endPtr != '\0' || errno == ERANGE || val < 1)
   {
     std::cerr << "Incorrect argument" << '\n';
     return 2;
   }
+
+  size_t threads = static_cast< size_t >(val);
 
   constexpr size_t size{1'000'000'000};
   mtt::data_t values(size, 1);
@@ -65,27 +50,54 @@ int main(int argc, char* argv[])
   double init{0}, total{0};
   mtt::Clicker cl;
 
-  init = cl.millisec();
-
-  std::vector< std::future< size_t > > results;
+  std::vector< std::future< mtt::value_t > > results;
   results.reserve(threads);
   size_t base = size / threads;
   size_t remainder = size % threads;
+  auto chunkBegin = values.cbegin();
+  using diff_t = mtt::data_t::difference_type;
+
+  init = cl.millisec();
+
   for (size_t i = 0; i < threads; ++i)
   {
-    size_t start = i * base + std::min(i, remainder);
-    size_t end = start + base + (i < remainder ? 1 : 0);
+    size_t chunkSize = base + (i < remainder ? 1 : 0);
+    auto chunkEnd = chunkBegin + static_cast< diff_t >(chunkSize);
 
-    results.emplace_back(std::async(std::launch::async, mtt::sum, std::cref(values), start, end));
+    results.emplace_back(std::async(std::launch::async, mtt::sum, chunkBegin, chunkEnd));
+    chunkBegin = chunkEnd;
   }
 
-  for (size_t i = 0; i < threads; ++i)
+  for (auto& ft : results)
   {
-    sum += results[i].get();
+    sum += ft.get();
   }
 
   total = cl.millisec();
 
   std::cout << "Result: " << sum << '\n';
   std::cout << "Execution time: " << total - init << '\n';
+}
+
+mtt::Clicker::Clicker():
+  start_(std::chrono::high_resolution_clock::now())
+{}
+
+double mtt::Clicker::millisec() const
+{
+  using std::chrono::duration_cast;
+  using std::chrono::high_resolution_clock;
+  using std::chrono::milliseconds;
+  auto t = high_resolution_clock::now();
+  return static_cast< double >(duration_cast< milliseconds >(t - start_).count());
+}
+
+mtt::value_t mtt::sum(data_t::const_iterator start, data_t::const_iterator end)
+{
+  value_t res = 0;
+  for (; start != end; ++start)
+  {
+    res += *start;
+  }
+  return res;
 }
